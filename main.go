@@ -12,11 +12,10 @@ import (
 )
 
 const (
-	taskName  = "OnBootRunPowerShell"
-	configDir = `D:\SetUpOnBoot`
+	taskName = "OnBootRunPowerShell"
 )
 
-func installTask() error {
+func installTask(file string) error {
 	exePath, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("could not get executable path: %w", err)
@@ -26,10 +25,10 @@ func installTask() error {
 	args := []string{
 		"/Create",
 		"/TN", taskName,
-		"/TR", fmt.Sprintf(`"%s"`, exePath),
+		"/TR", fmt.Sprintf(`%s %s`, exePath, file),
 		"/SC", "ONSTART",
 		"/RL", "HIGHEST",
-		"/F",
+		"/RU", "SYSTEM",
 	}
 
 	cmd := exec.Command("schtasks", args...)
@@ -49,6 +48,8 @@ func loadCommands(dir string) ([]string, error) {
 		if err != nil {
 			fmt.Printf("Error parsing %s: %v\n", path, err)
 			return nil // keep going even on parse error
+		} else {
+			fmt.Printf("Found file to parse: %s\n", path)
 		}
 		allCmds = append(allCmds, cmds...)
 		return nil
@@ -86,29 +87,42 @@ func parseYAMLFile(path string) ([]string, error) {
 	return cmds, nil
 }
 
+func help() {
+	fmt.Printf("Usage: %s [install] E:\n", os.Args[0])
+	fmt.Printf("\tPass install to use `schtasks` to install.\n")
+	fmt.Printf("\tSet the last parameter to specify where yaml files can be found\n")
+	fmt.Printf("\tCommands will be a list of strings under raw_cmd, appended in lexical order\n")
+}
+
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "install" {
-		if err := installTask(); err != nil {
+	if len(os.Args) == 3 && os.Args[1] == "install" {
+		if err := installTask(os.Args[2]); err != nil {
 			fmt.Println("Installation failed:", err)
 			os.Exit(1)
 		}
 		fmt.Println("Task Scheduler installation complete.")
 		return
-	}
-
-	cmds, err := loadCommands(configDir)
-	if err != nil {
-		fmt.Println("Error loading commands:", err)
-		os.Exit(1)
-	}
-
-	for _, line := range cmds {
-		fmt.Println("Running:", line)
-		cmd := exec.Command("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", line)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			fmt.Printf("Command failed: %v\n", err)
+	} else if len(os.Args) == 2 {
+		cmds, err := loadCommands(os.Args[1])
+		if err != nil {
+			fmt.Println("Error loading commands:", err)
+			os.Exit(1)
 		}
+
+		if len(cmds) == 0 {
+			fmt.Println("No commands provided at " + os.Args[1])
+		}
+
+		for _, line := range cmds {
+			fmt.Println("Running:", line)
+			cmd := exec.Command("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", line)
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if err := cmd.Run(); err != nil {
+				fmt.Printf("Command failed: %v\n", err)
+			}
+		}
+	} else {
+		help()
 	}
 }
