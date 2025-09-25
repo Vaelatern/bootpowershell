@@ -15,6 +15,12 @@ const (
 	taskName = "OnBootRunPowerShell"
 )
 
+// Commands holds both PowerShell and CMD commands
+type Commands struct {
+	Powershell []string
+	Cmd        []string
+}
+
 func installTask(file string) error {
 	exePath, err := os.Executable()
 	if err != nil {
@@ -37,8 +43,8 @@ func installTask(file string) error {
 	return cmd.Run()
 }
 
-func loadCommands(dir string) ([]string, error) {
-	var allCmds []string
+func loadCommands(dir string) (Commands, error) {
+	var allCmds Commands
 
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(d.Name(), ".yml") {
@@ -51,47 +57,73 @@ func loadCommands(dir string) ([]string, error) {
 		} else {
 			fmt.Printf("Found file to parse: %s\n", path)
 		}
-		allCmds = append(allCmds, cmds...)
+		allCmds.Powershell = append(allCmds.Powershell, cmds.Powershell...)
+		allCmds.Cmd = append(allCmds.Cmd, cmds.Cmd...)
 		return nil
 	})
 	return allCmds, err
 }
 
-func parseYAMLFile(path string) ([]string, error) {
+func parseYAMLFile(path string) (Commands, error) {
 	var root map[string]interface{}
+	var cmds Commands
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read error: %w", err)
+		return cmds, fmt.Errorf("read error: %w", err)
 	}
 	if err := yaml.Unmarshal(data, &root); err != nil {
-		return nil, fmt.Errorf("YAML unmarshal error: %w", err)
+		return cmds, fmt.Errorf("YAML unmarshal error: %w", err)
 	}
 
-	raw, ok := root["raw_cmd"]
-	if !ok {
-		return nil, nil
-	}
-
-	items, ok := raw.([]interface{})
-	if !ok {
-		return nil, fmt.Errorf("invalid raw_cmd type in %s", path)
-	}
-
-	var cmds []string
-	for _, v := range items {
-		if str, ok := v.(string); ok {
-			cmds = append(cmds, str)
+	// Check for PowerShell commands (raw_ps)
+	if psRaw, psOk := root["raw_ps"]; psOk {
+		items, ok := psRaw.([]interface{})
+		if !ok {
+			return cmds, fmt.Errorf("invalid raw_ps type in %s", path)
+		}
+		for _, v := range items {
+			if str, ok := v.(string); ok {
+				cmds.Powershell = append(cmds.Powershell, str)
+			}
 		}
 	}
+
+	// Check for CMD commands (raw_cmd)
+	if cmdRaw, cmdOk := root["raw_cmd"]; cmdOk {
+		items, ok := cmdRaw.([]interface{})
+		if !ok {
+			return cmds, fmt.Errorf("invalid raw_cmd type in %s", path)
+		}
+		for _, v := range items {
+			if str, ok := v.(string); ok {
+				cmds.Cmd = append(cmds.Cmd, str)
+			}
+		}
+	}
+
 	return cmds, nil
+}
+
+func runPs(line string) error {
+	cmd := exec.Command("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", line)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func runCmd(line string) error {
+	cmd := exec.Command("cmd", "/C", line)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
 
 func help() {
 	fmt.Printf("Usage: %s [install] E:\n", os.Args[0])
 	fmt.Printf("\tPass install to use `schtasks` to install.\n")
 	fmt.Printf("\tSet the last parameter to specify where yaml files can be found\n")
-	fmt.Printf("\tCommands will be a list of strings under raw_cmd, appended in lexical order\n")
+	fmt.Printf("\tCommands will be a list of strings under raw_ps or raw_cmd, appended in lexical order\n")
 }
 
 func main() {
@@ -109,17 +141,21 @@ func main() {
 			os.Exit(1)
 		}
 
-		if len(cmds) == 0 {
+		if len(cmds.Powershell) == 0 && len(cmds.Cmd) == 0 {
 			fmt.Println("No commands provided at " + os.Args[1])
 		}
 
-		for _, line := range cmds {
-			fmt.Println("Running:", line)
-			cmd := exec.Command("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", line)
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-			if err := cmd.Run(); err != nil {
-				fmt.Printf("Command failed: %v\n", err)
+		for _, line := range cmds.Powershell {
+			fmt.Println("Running PowerShell:", line)
+			if err := runPs(line); err != nil {
+				fmt.Printf("PowerShell command failed: %v\n", err)
+			}
+		}
+
+		for _, line := range cmds.Cmd {
+			fmt.Println("Running CMD:", line)
+			if err := runCmd(line); err != nil {
+				fmt.Printf("CMD command failed: %v\n", err)
 			}
 		}
 	} else {
