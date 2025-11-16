@@ -1,0 +1,4 @@
+raw_ps:
+  - "powershell-cmd-here"
+raw_cmd:
+  - "abc"
