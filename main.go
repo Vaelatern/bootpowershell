@@ -21,6 +21,12 @@ type Commands struct {
 	Cmd        []string
 }
 
+// FileCommands holds commands for a specific file
+type FileCommands struct {
+	Path     string
+	Commands Commands
+}
+
 func installTask(file string) error {
 	exePath, err := os.Executable()
 	if err != nil {
@@ -43,8 +49,8 @@ func installTask(file string) error {
 	return cmd.Run()
 }
 
-func loadCommands(dir string) (Commands, error) {
-	var allCmds Commands
+func loadCommands(dir string) ([]FileCommands, error) {
+	var allFileCmds []FileCommands
 
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(d.Name(), ".yml") {
@@ -57,11 +63,10 @@ func loadCommands(dir string) (Commands, error) {
 		} else {
 			fmt.Printf("Found file to parse: %s\n", path)
 		}
-		allCmds.Powershell = append(allCmds.Powershell, cmds.Powershell...)
-		allCmds.Cmd = append(allCmds.Cmd, cmds.Cmd...)
+		allFileCmds = append(allFileCmds, FileCommands{Path: path, Commands: cmds})
 		return nil
 	})
-	return allCmds, err
+	return allFileCmds, err
 }
 
 func parseYAMLFile(path string) (Commands, error) {
@@ -135,27 +140,34 @@ func main() {
 		fmt.Println("Task Scheduler installation complete.")
 		return
 	} else if len(os.Args) == 2 {
-		cmds, err := loadCommands(os.Args[1])
+		fileCmds, err := loadCommands(os.Args[1])
 		if err != nil {
 			fmt.Println("Error loading commands:", err)
 			os.Exit(1)
 		}
 
-		if len(cmds.Powershell) == 0 && len(cmds.Cmd) == 0 {
-			fmt.Println("No commands provided at " + os.Args[1])
+		if len(fileCmds) == 0 {
+			fmt.Println("No command files provided at " + os.Args[1])
 		}
 
-		for _, line := range cmds.Powershell {
-			fmt.Println("Running PowerShell:", line)
-			if err := runPs(line); err != nil {
-				fmt.Printf("PowerShell command failed: %v\n", err)
+		for fname, fc := range fileCmds {
+			fmt.Printf("Running file: %s\n", fc.Path)
+			if len(fc.Commands.Powershell) == 0 && len(fc.Commands.Cmd) == 0 {
+				fmt.Printf("No recognized commands in file %s\n", fname)
+				continue
 			}
-		}
+			for _, line := range fc.Commands.Powershell {
+				fmt.Println("Running PowerShell:", line)
+				if err := runPs(line); err != nil {
+					fmt.Printf("PowerShell command failed: %v\n", err)
+				}
+			}
 
-		for _, line := range cmds.Cmd {
-			fmt.Println("Running CMD:", line)
-			if err := runCmd(line); err != nil {
-				fmt.Printf("CMD command failed: %v\n", err)
+			for _, line := range fc.Commands.Cmd {
+				fmt.Println("Running CMD:", line)
+				if err := runCmd(line); err != nil {
+					fmt.Printf("CMD command failed: %v\n", err)
+				}
 			}
 		}
 	} else {
