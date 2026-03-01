@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -149,6 +150,15 @@ func main() {
 		if len(fileCmds) == 0 {
 			fmt.Println("No command files provided at " + os.Args[1])
 		}
+
+		slices.SortFunc(fileCmds, func(a, b FileCommands) int {
+			if a.Path < b.Path {
+				return -1
+			} else if a.Path > b.Path {
+				return 1
+			}
+			return 0
+		})
 
 		for fname, fc := range fileCmds {
 			fmt.Printf("Running file: %s\n", fc.Path)
